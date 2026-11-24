@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pocket island</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <meta name="description" content="A tiny low-poly 3D island of my story. Drag to spin it, tap a place to learn more." />
+  </head>
+  <body>
+    <main>
+      <h1>Pocket island</h1>
+      <p class="lede">
+        My story so far as a tiny floating island: Toronto, Laurier, GameCraft Camp, work, and games. The lighting follows
+        the real time in Toronto. Drag to spin it, tap a place to learn more.
+      </p>
+      <div class="stage">
+        <canvas
+          id="island"
+          tabindex="0"
+          aria-label="A 3D island with five places from my story. Use the arrow keys to visit each one."
+        ></canvas>
+        <p id="caption" aria-live="polite"></p>
+        <ul id="places" class="sr-only"></ul>
+      </div>
+      <footer>
+        Built by <a href="https://zohair-portfolio-eta.vercel.app">Zohair Syed</a>.
+        <a href="https://github.com/zo2450/threejs-projects/tree/main/pocket-island">Source on GitHub</a>
+      </footer>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

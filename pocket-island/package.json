@@ -1,0 +1,22 @@
+{
+  "name": "pocket-island",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A tiny low-poly 3D island of my story: Toronto, Laurier, GameCraft Camp, work and games. Drag to spin, tap a place.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite --port 3004 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 3004",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
