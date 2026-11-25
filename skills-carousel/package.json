@@ -1,0 +1,23 @@
+{
+  "name": "skills-carousel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A 3D carousel of the tools I work with. Work in progress.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite --port 3005 --strictPort",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --port 3005",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "simple-icons": "^16.38.1",
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
