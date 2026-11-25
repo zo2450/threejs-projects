@@ -1,4 +1,7 @@
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import { buildLogo } from "./logo3d";
 import { SKILLS, type Skill } from "./skills";
 import "./style.css";
 
@@ -12,95 +15,137 @@ const list = document.querySelector<HTMLElement>("#skills");
 if (!canvas || !caption || !list) throw new Error("Missing page elements");
 
 // Text version for screen readers.
-list.innerHTML = SKILLS.map((skill) => `<li>${skill.name}</li>`).join("");
+list.innerHTML = SKILLS.map((skill) => `<li>${skill.name} (${skill.category})</li>`).join("");
 
+// ---- Renderer, scene, lighting ----
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+renderer.toneMapping = THREE.NeutralToneMapping; // keeps brand colours true; ACES washes them out
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog("#0c0b12", 6.5, 11);
-const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 50);
+const BACKGROUND = "#0c0b12";
+scene.fog = new THREE.Fog(BACKGROUND, 8, 14);
+// A soft studio environment gives the glossy tiles something to reflect.
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
 
-// ---- Tiles: one rounded square per skill, logo drawn on a canvas texture ----
-const TILE = 1.15;
-const RADIUS = (SKILLS.length * TILE * 1.25) / (Math.PI * 2);
+const camera = new THREE.PerspectiveCamera(30, 1, 0.1, 60);
 
-/** Very dark brand colours (Next.js, Three.js...) would vanish on a dark tile, so draw those white. */
-function logoColour(hex: string) {
-  const n = Number.parseInt(hex, 16);
-  const luminance = (0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
-  return luminance < 0.25 ? "#ffffff" : `#${hex}`;
+scene.add(new THREE.AmbientLight("#ffffff", 0.25));
+const key = new THREE.DirectionalLight("#ffffff", 1.4);
+key.position.set(1, 3, 6);
+scene.add(key);
+// Coloured rim lights from either side, matching the site's violet and teal.
+const violet = new THREE.PointLight("#a78bfa", 30, 16);
+violet.position.set(-5, 1.5, 2);
+const teal = new THREE.PointLight("#2dd4bf", 22, 16);
+teal.position.set(5, -1.5, 2);
+scene.add(violet, teal);
+
+// ---- Logos ----
+// Each logo is its own 3D object, extruded from its SVG outline (see logo3d.ts).
+// Add ?tiles to the URL to sit each logo on a glossy tile instead of floating free.
+const withTiles = params.has("tiles");
+const TILE = 1;
+const DEPTH = 0.24;
+const tileGeometry = new RoundedBoxGeometry(TILE, TILE, DEPTH, 5, 0.18);
+const tileMaterial = new THREE.MeshPhysicalMaterial({
+  color: "#181430",
+  roughness: 0.3,
+  metalness: 0.2,
+  clearcoat: 0.9,
+  clearcoatRoughness: 0.2,
+  envMapIntensity: 0.55,
+});
+// Invisible box around each logo so hovering doesn't need pixel-perfect aim.
+const hitGeometry = new THREE.BoxGeometry(TILE, TILE, 0.4);
+const hitMaterial = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
+
+interface Tile {
+  /** Placed on the ring */
+  group: THREE.Group;
+  /** What moves: sway, bob and hover lift */
+  holder: THREE.Group;
+  skill: Skill;
+  /** Animated hover amount, 0 to 1 */
+  lift: number;
 }
 
-function tileTexture(skill: Skill) {
-  const size = 256;
-  const c = document.createElement("canvas");
-  c.width = size;
-  c.height = size;
-  const ctx = c.getContext("2d")!;
-  const r = 44;
-  ctx.beginPath();
-  ctx.roundRect(6, 6, size - 12, size - 12, r);
-  ctx.fillStyle = "#17142a";
-  ctx.fill();
-  ctx.lineWidth = 4;
-  ctx.strokeStyle = "rgba(196, 181, 253, 0.35)";
-  ctx.stroke();
+const tiles: Tile[] = [];
+const pickTargets: THREE.Object3D[] = [];
 
-  // simple-icons paths are drawn in a 24×24 box.
-  const scale = 5.6;
-  ctx.save();
-  ctx.translate(size / 2 - 12 * scale, size / 2 - 12 * scale);
-  ctx.scale(scale, scale);
-  ctx.fillStyle = logoColour(skill.icon.hex);
-  ctx.fill(new Path2D(skill.icon.path));
-  ctx.restore();
+/** Two rings, one above the other, turning in opposite directions. */
+const half = Math.ceil(SKILLS.length / 2);
+const ringSkills = [SKILLS.slice(0, half), SKILLS.slice(half)];
+const RADIUS = (half * TILE * 1.3) / (Math.PI * 2);
+const RING_GAP = 0.68;
 
-  const texture = new THREE.CanvasTexture(c);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
-  return texture;
-}
+const rings = ringSkills.map((skills, ringIndex) => {
+  const ring = new THREE.Group();
+  ring.position.y = ringIndex === 0 ? RING_GAP : -RING_GAP;
+  skills.forEach((skill, i) => {
+    const angle = (i / skills.length) * Math.PI * 2 + (ringIndex === 1 ? Math.PI / skills.length : 0);
+    const group = new THREE.Group();
+    group.position.set(Math.sin(angle) * RADIUS, 0, Math.cos(angle) * RADIUS);
+    group.rotation.y = angle;
+    const holder = new THREE.Group();
+    group.add(holder);
 
-const ring = new THREE.Group();
-scene.add(ring);
-const tiles: THREE.Mesh[] = SKILLS.map((skill, i) => {
-  const angle = (i / SKILLS.length) * Math.PI * 2;
-  const tile = new THREE.Mesh(
-    new THREE.PlaneGeometry(TILE, TILE),
-    new THREE.MeshBasicMaterial({ map: tileTexture(skill), transparent: true, side: THREE.DoubleSide }),
-  );
-  tile.position.set(Math.sin(angle) * RADIUS, 0, Math.cos(angle) * RADIUS);
-  tile.rotation.y = angle;
-  tile.userData.skill = skill;
-  tile.userData.angle = angle;
-  ring.add(tile);
-  return tile;
+    const logo = buildLogo(skill, withTiles ? TILE * 0.66 : TILE * 0.82);
+    if (withTiles) {
+      holder.add(new THREE.Mesh(tileGeometry, tileMaterial));
+      logo.geometry.computeBoundingBox();
+      logo.position.z = DEPTH / 2 - logo.geometry.boundingBox!.min.z * 0.5;
+    }
+    holder.add(logo);
+
+    const hit = new THREE.Mesh(hitGeometry, hitMaterial);
+    hit.userData.tile = tiles.length;
+    holder.add(hit);
+
+    ring.add(group);
+    pickTargets.push(hit);
+    tiles.push({ group, holder, skill, lift: 0 });
+  });
+  scene.add(ring);
+  return ring;
 });
 
-// ---- Sizing ----
+// ---- Sizing: keep both rings in frame at any aspect ratio ----
 function resize() {
   const { width, height } = canvas!.getBoundingClientRect();
   if (!width || !height) return;
   renderer.setSize(width, height, false);
   camera.aspect = width / height;
-  // Keep about three tiles across the front, whatever the card's shape.
   const halfFov = THREE.MathUtils.degToRad(camera.fov / 2);
-  const distance = RADIUS + Math.max(1.6 / Math.tan(halfFov), 2.1 / (Math.tan(halfFov) * camera.aspect));
-  camera.position.set(0, 0.9, distance);
+  const distance = RADIUS + Math.max(1.75 / Math.tan(halfFov), 2.65 / (Math.tan(halfFov) * camera.aspect));
+  camera.position.set(0, 0.55, distance);
   camera.lookAt(0, 0, 0);
   camera.updateProjectionMatrix();
+  const fog = scene.fog as THREE.Fog;
+  fog.near = distance - RADIUS * 0.4;
+  fog.far = distance + RADIUS * 1.4;
 }
 new ResizeObserver(resize).observe(canvas);
 resize();
 
-// ---- Interaction: drag to spin, hover to name a tile ----
-let rotation = 0;
+// ---- Interaction: drag to spin, hover a tile to lift it and show its name ----
+let spin = 0;
 let velocity = 0;
 let dragging = false;
 let lastX = 0;
-let hovered: Skill | null = null;
+let hovered: number | null = null;
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
+
+function pick(event: PointerEvent) {
+  const rect = canvas!.getBoundingClientRect();
+  ndc.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObjects(pickTargets)[0];
+  return hit ? (hit.object.userData.tile as number) : null;
+}
 
 canvas.addEventListener("pointerdown", (event) => {
   dragging = true;
@@ -112,51 +157,52 @@ canvas.addEventListener("pointermove", (event) => {
   if (dragging) {
     const dx = event.clientX - lastX;
     lastX = event.clientX;
-    rotation += dx * 0.008;
-    velocity = dx * 0.008;
+    spin += dx * 0.007;
+    velocity = dx * 0.007;
     return;
   }
-  const rect = canvas.getBoundingClientRect();
-  ndc.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
-  raycaster.setFromCamera(ndc, camera);
-  const hit = raycaster.intersectObjects(tiles)[0];
-  hovered = hit ? (hit.object.userData.skill as Skill) : null;
+  hovered = pick(event);
+  canvas.style.cursor = hovered === null ? "grab" : "pointer";
 });
-canvas.addEventListener("pointerup", () => {
+canvas.addEventListener("pointerup", (event) => {
   dragging = false;
+  // A tap (no drag) on touch screens selects the tile under the finger.
+  if (Math.abs(velocity) < 0.002) hovered = pick(event);
 });
 canvas.addEventListener("pointerleave", () => {
   hovered = null;
 });
 canvas.addEventListener("keydown", (event) => {
-  const step = (Math.PI * 2) / SKILLS.length;
-  if (event.key === "ArrowLeft") rotation += step;
-  else if (event.key === "ArrowRight") rotation -= step;
+  const step = (Math.PI * 2) / half;
+  if (event.key === "ArrowLeft") spin += step;
+  else if (event.key === "ArrowRight") spin -= step;
   else return;
+  hovered = null;
   event.preventDefault();
 });
 
-/** The tile closest to the viewer right now. */
-function frontSkill(): Skill {
-  let best = tiles[0];
+/** The tile on the top ring closest to the viewer right now. */
+const world = new THREE.Vector3();
+function frontTile() {
+  let best = 0;
   let bestZ = -Infinity;
-  const world = new THREE.Vector3();
-  for (const tile of tiles) {
-    tile.getWorldPosition(world);
+  for (let i = 0; i < ringSkills[0].length; i++) {
+    tiles[i].group.getWorldPosition(world);
     if (world.z > bestZ) {
       bestZ = world.z;
-      best = tile;
+      best = i;
     }
   }
-  return best.userData.skill as Skill;
+  return best;
 }
 
 let shown = "";
 function updateCaption() {
-  const name = (hovered ?? frontSkill()).name;
-  if (name !== shown) {
-    shown = name;
-    caption!.textContent = name;
+  const { skill } = tiles[hovered ?? frontTile()];
+  const text = `${skill.name} · ${skill.category}`;
+  if (text !== shown) {
+    shown = text;
+    caption!.textContent = text;
   }
 }
 
@@ -171,16 +217,31 @@ function frame() {
   const t = timer.getElapsed();
 
   if (!dragging) {
-    rotation += velocity;
+    spin += velocity;
     velocity *= 0.94;
-    if (!reducedMotion && !hovered && Math.abs(velocity) < 0.001) rotation -= dt * 0.25;
+    if (!reducedMotion && hovered === null && Math.abs(velocity) < 0.001) spin -= dt * 0.22;
   }
-  ring.rotation.y = rotation;
+  rings[0].rotation.y = spin;
+  rings[1].rotation.y = -spin * 0.85;
+
+  tiles.forEach((tile, i) => {
+    const target = hovered === i ? 1 : 0;
+    tile.lift += (target - tile.lift) * Math.min(1, dt * 10);
+    const { holder } = tile;
+    holder.scale.setScalar(1 + tile.lift * 0.18);
+    // Lift the hovered logo out of the ring towards the viewer.
+    const bob = reducedMotion ? 0 : Math.sin(t * 1.1 + i * 0.6) * 0.05;
+    holder.position.set(0, bob + tile.lift * 0.08, tile.lift * 0.3);
+    // Free-floating logos sway on their own axis, and turn to face you when hovered.
+    const sway = reducedMotion || withTiles ? 0 : Math.sin(t * 0.8 + i * 1.3) * 0.5;
+    holder.rotation.y = sway * (1 - tile.lift);
+  });
+
   if (!reducedMotion) {
-    tiles.forEach((tile, i) => {
-      tile.position.y = Math.sin(t * 1.2 + i * 0.7) * 0.06;
-    });
+    violet.position.x = -5 + Math.sin(t * 0.4) * 1.2;
+    teal.position.x = 5 + Math.cos(t * 0.35) * 1.2;
   }
+
   updateCaption();
   renderer.render(scene, camera);
   requestAnimationFrame(frame);
